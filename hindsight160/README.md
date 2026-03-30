@@ -17,6 +17,8 @@ It automatically attempts to keep the 5 GHz radio or radios on 160 MHz after a D
 
 ASUS never implemented an automatic 160 MHz recovery mechanism in their firmware — hence the name. When a DFS radar event forces the radio off a 160 MHz channel, it stays on 80 MHz until manually reconfigured. This script fills that gap by running periodically and issuing a controlled `dfs_ap_move` to recover 160 MHz operation using the router's own built‑in background DFS CAC mechanism.
 
+The main highlight of this script is that it does the recovery with minimal disconnects and interruption to clients. The usual method before was to restart the wireless radio to regain a 160mhz connection.
+
 - **Target devices**: Dual‑band and tri‑band WiFi 5/WiFi 6 routers running Asuswrt‑Merlin.
 - **Function**: Runs via cron every 30 minutes (`1,31 * * * *`).
 - **Mode selection**: Automatically detects whether the router is dual‑band or tri‑band. Can also be forced manually via `IFACE1`/`IFACE2`.

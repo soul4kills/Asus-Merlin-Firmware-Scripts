@@ -139,7 +139,7 @@ Radio is on `100/80` after a DFS hit, GUI set to Auto:
 ## Quick install
 
 ```sh
-curl -L "https://raw.githubusercontent.com/soul4kills/Asus-Merlin-Firmware-Scripts/refs/heads/main/fix_160A/fix_160A.sh" -o /jffs/scripts/fix_160A.sh && \
+curl -L "https://raw.githubusercontent.com/soul4kills/hindsight160/refs/heads/main/fix_160A/fix_160A.sh" -o /jffs/scripts/fix_160A.sh && \
 chmod 755 /jffs/scripts/fix_160A.sh && \
 cru a fix_160A "1,31 * * * * /jffs/scripts/fix_160A.sh"
 ```
@@ -150,7 +150,7 @@ cru a fix_160A "1,31 * * * * /jffs/scripts/fix_160A.sh"
 
 1. Download:
    ```sh
-   curl -L "https://raw.githubusercontent.com/soul4kills/Asus-Merlin-Firmware-Scripts/refs/heads/main/fix_160A/fix_160A.sh" -o /jffs/scripts/fix_160A.sh
+   curl -L "https://raw.githubusercontent.com/soul4kills/hindsight160/refs/heads/main/fix_160A/fix_160A.sh" -o /jffs/scripts/fix_160A.sh
    ```
 
 2. Make executable:

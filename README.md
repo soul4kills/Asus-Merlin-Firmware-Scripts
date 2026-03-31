@@ -137,7 +137,7 @@ If `DISABLE_FALLBACK=0` and the preferred block is still blocked, the script may
 Run this on the router shell (via SSH) to install and register the script:
 
 ```sh
-curl -L "https://raw.githubusercontent.com/soul4kills/Asus-Merlin-Firmware-Scripts/refs/heads/main/fix_160A.sh" -o /jffs/scripts/fix_160A.sh && \
+curl -L "https://raw.githubusercontent.com/soul4kills/hindsight160/refs/heads/main/fix_160A.sh" -o /jffs/scripts/fix_160A.sh && \
 chmod a+x /jffs/scripts/fix_160A.sh && \
 cru a fix_160A "1,31 * * * * /jffs/scripts/fix_160A.sh"
 ```
@@ -155,7 +155,7 @@ This:
 1. Download:
 
    ```sh
-   curl -L "https://raw.githubusercontent.com/soul4kills/Asus-Merlin-Firmware-Scripts/refs/heads/main/fix_160A.sh" -o /jffs/scripts/fix_160A.sh
+   curl -L "https://raw.githubusercontent.com/soul4kills/hindsight160/refs/heads/main/fix_160A.sh" -o /jffs/scripts/fix_160A.sh
    ```
 
 2. Make executable:

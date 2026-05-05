@@ -129,14 +129,78 @@ _build_cron_day_field() {
     echo "$_d"
 }
 
+# ---------------------------------------------------------------------------
+# _crosses_midnight START_HH START_MM END_HH END_MM
+#
+# Returns 0 (true) if the block window spans midnight, 1 (false) otherwise.
+# A window crosses midnight when the end time is earlier than the start time
+# (e.g. start=22:00, end=06:00).  Equal times are treated as same-day.
+# ---------------------------------------------------------------------------
+_crosses_midnight() {
+    _sh="$1"; _sm="$2"; _eh="$3"; _em="$4"
+    _s=$(( (_sh * 60) + _sm ))
+    _e=$(( (_eh * 60) + _em ))
+    [ "$_e" -lt "$_s" ]
+}
+
+# ---------------------------------------------------------------------------
+# _next_day_field DAY_FIELD
+#
+# Given a cron day-of-week field, returns the field shifted forward by one day.
+# Used to schedule the stop job on the correct calendar day when the block
+# window crosses midnight (e.g. start Mon 22:00, stop Tue 06:00).
+#
+#   "*"          -> "*"    (every day stays every day)
+#   "1,2,3,4,5"  -> "2,3,4,5,6"  (Tue-Sat)
+#   "0,6"        -> "0,1"         (Sun,Mon -- 6 wraps to 0)
+# ---------------------------------------------------------------------------
+_next_day_field() {
+    _d="${1:-*}"
+    [ "$_d" = "*" ] && { echo "*"; return; }
+
+    _result=""
+    # Split on commas and advance each day number by 1, wrapping 6->0
+    IFS=","
+    for _day in $_d; do
+        _next=$(( (_day + 1) % 7 ))
+        if [ -z "$_result" ]; then
+            _result="$_next"
+        else
+            _result="${_result},${_next}"
+        fi
+    done
+    unset IFS
+
+    # De-duplicate (e.g. "0,1,2,3,4,5,6" -> "0,1,2,3,4,5,6", all 7 days -> "*")
+    # Count unique values; if all 7 days present, collapse to "*"
+    _count=$(echo "$_result" | tr ',' '\n' | sort -u | wc -l)
+    if [ "$_count" -ge 7 ]; then
+        echo "*"
+    else
+        echo "$_result" | tr ',' '\n' | sort -un | tr '\n' ',' | sed 's/,$//'
+    fi
+}
+
 install_cron() {
     _day_field=$(_build_cron_day_field "$DAYS")
+
+    # Determine the correct day field for the stop job.
+    # When the window crosses midnight the stop fires on the *next* calendar
+    # day relative to the start (e.g. start Mon 22:00 -> stop Tue 06:00).
+    if _crosses_midnight "$START_HH" "$START_MM" "$END_HH" "$END_MM"; then
+        _stop_day_field=$(_next_day_field "$_day_field")
+        _midnight_note=" (crosses midnight)"
+    else
+        _stop_day_field="$_day_field"
+        _midnight_note=""
+    fi
+
     cru a "$JOB_START" "$START_MM $START_HH * * $_day_field $SCRIPT start"
-    cru a "$JOB_STOP"  "$END_MM $END_HH * * $_day_field $SCRIPT stop"
+    cru a "$JOB_STOP"  "$END_MM $END_HH * * $_stop_day_field $SCRIPT stop"
     cfg_set "wlw_cron_active" "1"
     logger "wl_window" "(wlw_cron_active=1)"
-    logger "wl_window" "Cron jobs installed: start=${START_HH}:${START_MM} stop=${END_HH}:${END_MM} days=${_day_field}"
-    echo "[+] Cron jobs added: start=${START_HH}:${START_MM} stop=${END_HH}:${END_MM} days=${_day_field}"
+    logger "wl_window" "Cron jobs installed: start=${START_HH}:${START_MM} (${_day_field}) stop=${END_HH}:${END_MM} (${_stop_day_field})${_midnight_note}"
+    echo "[+] Cron jobs added: start=${START_HH}:${START_MM} days=${_day_field}, stop=${END_HH}:${END_MM} days=${_stop_day_field}${_midnight_note}"
 }
 
 uninstall_cron() {
@@ -241,10 +305,18 @@ show_status() {
     _day_field=$(_build_cron_day_field "$DAYS")
     _day_label=$(_days_label "$_day_field")
 
+    if _crosses_midnight "$START_HH" "$START_MM" "$END_HH" "$END_MM"; then
+        _stop_day_field=$(_next_day_field "$_day_field")
+        _stop_day_label=$(_days_label "$_stop_day_field")
+        _sched_note=" [crosses midnight -- stop fires on ${_stop_day_label}]"
+    else
+        _sched_note=""
+    fi
+
     echo "=== Whitelist Window - Dual-Stack Status ==="
     echo ""
     echo "Config  : $([ -f "$SETTINGS" ] && echo "$SETTINGS" || echo "built-in defaults")"
-    echo "Schedule: ON at ${START_HH}:${START_MM}, OFF at ${END_HH}:${END_MM}, Days: ${_day_label} (cron: ${_day_field})"
+    echo "Schedule: ON at ${START_HH}:${START_MM}, OFF at ${END_HH}:${END_MM}, Days: ${_day_label} (cron: ${_day_field})${_sched_note}"
     echo ""
     if iptables -L FORWARD 2>/dev/null | grep -q "$CHAIN"; then
         echo "STATE: ACTIVE"
@@ -294,7 +366,7 @@ install_script() {
         echo "[+] wlw_cron_active=1 -- installing cron schedule..."
         install_cron
     else
-        echo "[*] wlw_cron_active=0, skipping cron installation."
+        echo "[*] Skipping cron installation."
     fi
 
     _persist_active=$(cfg_get wlw_persist)
@@ -312,6 +384,7 @@ install_script() {
     # Populate client/interface/resolve data for the webui on first install
     sh "/jffs/addons/wl_window/wlwindow_service.sh" restart wlwindow_refresh
 
+    echo "[+] clients & interfaces list populated."
     echo "[+] Whitelist Window fully installed."
 }
 

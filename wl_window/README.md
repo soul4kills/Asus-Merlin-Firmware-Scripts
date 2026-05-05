@@ -7,6 +7,7 @@ This addon adds a Whitelist Window page to the AsusWRT‑Merlin web UI that lets
 - Whitelist specific MACs, IP addresses, and interfaces so they remain exempt.
 - Prevents clients from bypassing internet access blocks by mac address randomization
 - Added a block persistence if reboot the router is a method of bypass to be concerned about
+* There's an issue with the "Days" scheduling. I have to figure out a way to handle overlapping days. So only use "All Days" for now.
 
 It is designed for AsusWRT‑Merlin firmware and uses the JFFS partition and SSH.   
 Originally released here.  

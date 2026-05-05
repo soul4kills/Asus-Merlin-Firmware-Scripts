@@ -659,16 +659,6 @@ function wlw_keydown(e) {
 
         </table>
 
-        <div class="wlw_warn" style="margin-top:8px;">
-          <span class="wlw_warn_title">&#9888;&nbsp;&nbsp;BLOCK PERSISTENCE&nbsp;&nbsp;&#9888;</span>
-          <div class="wlw_warn_body">
-            Use only if a reboot to bypass access restrictions is a concern.
-            If configured incorrectly, it will lead to a permanent lockout requiring a hard reset.
-	    <br>
-            <strong>Test your settings thoroughly before enabling.</strong>
-          </div>
-        </div>
-
         <!-- WHITELIST TABLE -->
         <div class="wlw_section_label" style="margin-top:8px;">
           Whitelist Management (<span style="font-weight:normal;"> Click Apply to populate/refresh dropdown with existing clients </span>)

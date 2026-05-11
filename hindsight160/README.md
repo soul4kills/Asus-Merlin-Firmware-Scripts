@@ -46,6 +46,21 @@ https://www.snbforums.com/threads/script-160mhz-channel-recovery-for-wifi-6-only
 
 ***
 
+## Zero-configuration behavior
+
+`hindsight160.sh` is designed to work **without any manual setup** on most Asuswrt-Merlin routers.
+
+If you already configured your 5 GHz wireless settings in the **router GUI**, the script will read and respect those settings automatically:
+
+- **Preferred 160 MHz channel** comes from the GUI/NVRAM when a fixed 160 MHz chanspec is set.
+- **Fallback behavior** is derived from the script settings only when the router is not locked to a fixed 160 MHz chanspec.
+- **Sticky mode** is automatically enforced when the GUI/NVRAM is set to a fixed 160 MHz channel.
+- If both `IFACE1` and `IFACE2` are left empty, the script can auto-detect the 5 GHz interfaces.
+
+In other words, you can usually install the script and let it follow your router’s existing wireless configuration. Manual editing is only needed if you want to force specific interfaces or override the defaults.
+
+***
+
 ## ⚙️ Requirements
 
 - **Router firmware**: Asuswrt‑Merlin or similar (supports `wl`, `nvram`, and `cru`).  

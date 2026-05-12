@@ -275,7 +275,7 @@ process_radio() {
     fi
 
     # Not on 160MHz: build ordered target list and attempt recovery
-    log 1 "[$iface][WARN] On [${current_width}MHz][$current_spec] Attempting recovery."
+    log 1 "[$iface][WARN] On ${current_width}MHz [$current_spec] Attempting recovery."
     log_dfs_status "$iface" "PRE-MOVE"
 
     local targets="$preferred"

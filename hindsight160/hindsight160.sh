@@ -27,11 +27,13 @@ IFACE2=""               # Second 5GHz interface for tri-band mode only.
 PREFERRED="100/160"     # Preferred 160MHz target (may be overridden by NVRAM if wl1_chanspec != 0/AUTO)
 ENABLE_FALLBACK=1       # 0=always stay in PREFERRED range, never try the other 160MHz block
                         # 1=fallback to alternate 160MHz range if PREFERRED fails
-STRICT_STICKY=0         # 0=any 160MHz channel within the assigned block is acceptable (default)
+STRICT_STICKY=1         # 0=any 160MHz channel within the assigned block is acceptable (default)
                         # 1=must be on the exact preferred chanspec; any deviation triggers a move
                         # Note: automatically sets to 1 when NVRAM wl1_chanspec is set to FIXED channel (dual-band only)
 
 # Shared options
+REQUIRE_160_CLIENT=0    # 0=skip the 160MHz-capable-client check entirely; always attempt recovery
+                        # 1=only attempt recovery when an associated client advertises SGI160 (default)
 COOLDOWN=60             # Minimum seconds between recovery attempts (per radio in tri-band)
 CAC_POLL=60             # Seconds between each CAC status poll
 CAC_TIMEOUT=660         # Maximum seconds to wait for CAC completion before giving up
@@ -179,10 +181,18 @@ wait_for_cac() {
     return 1
 }
 
-# Returns 0 if at least one associated client advertises SGI160 in VHT caps.
+# Returns 0 if at least one associated client advertises SGI160 in VHT caps,
+# OR if the current channel is above 128 (non-DFS upper UNII-3 channels in
+# most regions, e.g. 149-165) in which case the client check is bypassed.
 # Returns 1 if no clients are present or none are 160MHz-capable.
 is_160_active_or_capable() {
-    local iface="$1" info
+    local iface="$1" info current_chan
+
+    current_chan=$(wl -i "$iface" chanspec 2>/dev/null | awk -F/ '{print $1}')
+    if [ "${current_chan:-0}" -gt 128 ] 2>/dev/null; then
+        log 3 "[$iface] Channel [$current_chan] above 128. Bypassing client-capability check."
+        return 0
+    fi
 
     info=$(wl -i "$iface" assoclist 2>/dev/null | grep -oE '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' 2>/dev/null | xargs -r -I {} wl -i "$iface" sta_info {} 2>/dev/null) || return 1
 
@@ -238,9 +248,13 @@ process_radio() {
     fi
 
     # 160MHz client capability check
-    if ! is_160_active_or_capable "$iface"; then
-        log 1 "[$iface][SKIP] No 160MHz-capable clients associated."
-        return
+    if [ "$REQUIRE_160_CLIENT" = "1" ]; then
+        if ! is_160_active_or_capable "$iface"; then
+            log 1 "[$iface][SKIP] No 160MHz-capable clients associated."
+            return
+        fi
+    else
+        log 1 "[$iface] Client capability check bypassed (REQUIRE_160_CLIENT=0)."
     fi
 
     # Read current radio state
@@ -275,7 +289,7 @@ process_radio() {
     fi
 
     # Not on 160MHz: build ordered target list and attempt recovery
-    log 1 "[$iface][WARN] On ${current_width}MHz [$current_spec] Attempting recovery."
+    log 1 "[$iface][WARN] On [${current_width}MHz][$current_spec] Attempting recovery."
     log_dfs_status "$iface" "PRE-MOVE"
 
     local targets="$preferred"
@@ -482,20 +496,26 @@ show_menu() {
         printf "${W}        0=if not in preferred channel range. (e.g. 100-128)\n"
         printf "        1=if not on preferred channel. (e.g. 100/160)\n"
         printf "\n"
+        printf " +-- Global: Client Gate (Skip client-capability check) -----------+\n"
+        printf "\n"
+        printf "${C}  [6]  REQUIRE_160_CLIENT: %s\n" "$REQUIRE_160_CLIENT"
+        printf "${W}        0=always attempt recovery, even with no 160MHz clients.\n"
+        printf "        1=only attempt recovery if a 160MHz-capable client is seen.\n"
+        printf "\n"
         printf " +-- Timing -------------------------------------------------------+\n"
         printf "\n"
-        printf "${C}  [6]  COOLDOWN          : %ss\n" "$COOLDOWN"
-        printf "  [7]  CAC_POLL          : %ss\n" "$CAC_POLL"
-        printf "  [8]  CAC_TIMEOUT       : %ss\n" "$CAC_TIMEOUT"
+        printf "${C}  [7]  COOLDOWN          : %ss\n" "$COOLDOWN"
+        printf "  [8]  CAC_POLL          : %ss\n" "$CAC_POLL"
+        printf "  [9]  CAC_TIMEOUT       : %ss\n" "$CAC_TIMEOUT"
         printf "\n"
         printf "${W} +-- Logging & Maintenance ----------------------------------------+\n"
         printf "\n"
-        printf "${C}  [9]  MANAGE_CRON       : %s\n" "$MANAGE_CRON"
-        printf "  [10] VERBOSE           : %s\n" "$VERBOSE"
+        printf "${C}  [10] MANAGE_CRON       : %s\n" "$MANAGE_CRON"
+        printf "  [11] VERBOSE           : %s\n" "$VERBOSE"
         printf "${W}        0=silent  1=basic logging  2=verbose (DFS status blocks).\n"
         printf "\n"
-        printf "${C}  [11] LOG_ROTATE_RAM    : %s\n" "$LOG_ROTATE_RAM"
-        printf "  [12] LOG_LINES         : %s\n" "$LOG_LINES"
+        printf "${C}  [12] LOG_ROTATE_RAM    : %s\n" "$LOG_ROTATE_RAM"
+        printf "  [13] LOG_LINES         : %s\n" "$LOG_LINES"
         printf "\n"
         printf "  [a]  About / Help\n"
         printf "  [i]  Install\n"
@@ -505,18 +525,19 @@ show_menu() {
         printf "${W}  Select option: "
         read -r choice
         case "$choice" in
-            1)  menu_edit "IFACE1"           "IFACE1  -  First 5GHz interface (empty = auto-detect)"    "$IFACE1"           "str"      ;;
-            2)  menu_edit "IFACE2"           "IFACE2  -  Second 5GHz interface (empty = auto/dual)"     "$IFACE2"           "str"      ;;
-            3)  menu_edit "PREFERRED"        "PREFERRED  -  Target chanspec (e.g. 100/160 or 36/160)"   "$PREFERRED"        "chanspec" ;;
-            4)  menu_edit "ENABLE_FALLBACK"  "ENABLE_FALLBACK  -  Try other 160MHz block (0/1)"         "$ENABLE_FALLBACK"  "bool"     ;;
-            5)  menu_edit "STRICT_STICKY"    "STRICT_STICKY  -  Require exact chanspec match (0/1)"     "$STRICT_STICKY"    "bool"     ;;
-            6)  menu_edit "COOLDOWN"         "COOLDOWN  -  Min seconds between recovery attempts"       "$COOLDOWN"         "int"      ;;
-            7)  menu_edit "CAC_POLL"         "CAC_POLL  -  Seconds between CAC status polls"            "$CAC_POLL"         "int"      ;;
-            8)  menu_edit "CAC_TIMEOUT"      "CAC_TIMEOUT  -  Max seconds to wait for CAC"              "$CAC_TIMEOUT"      "int"      ;;
-            9)  menu_edit "MANAGE_CRON"      "MANAGE_CRON  -  Auto-manage cron and init-start (0/1)"    "$MANAGE_CRON"      "bool"     ;;
-            10) menu_edit "VERBOSE"          "VERBOSE  -  Log level (0=silent, 1=basic, 2=verbose)"     "$VERBOSE"          "int"      ;;
-            11) menu_edit "LOG_ROTATE_RAM"   "LOG_ROTATE_RAM  -  Rotate log in RAM, no temp file (0/1)" "$LOG_ROTATE_RAM"   "bool"     ;;
-            12) menu_edit "LOG_LINES"        "LOG_LINES  -  Number of log lines to retain"              "$LOG_LINES"        "int"      ;;
+            1)  menu_edit "IFACE1"             "IFACE1  -  First 5GHz interface (empty = auto-detect)"    "$IFACE1"             "str"      ;;
+            2)  menu_edit "IFACE2"             "IFACE2  -  Second 5GHz interface (empty = auto/dual)"     "$IFACE2"             "str"      ;;
+            3)  menu_edit "PREFERRED"          "PREFERRED  -  Target chanspec (e.g. 100/160 or 36/160)"   "$PREFERRED"          "chanspec" ;;
+            4)  menu_edit "ENABLE_FALLBACK"    "ENABLE_FALLBACK  -  Try other 160MHz block (0/1)"         "$ENABLE_FALLBACK"    "bool"     ;;
+            5)  menu_edit "STRICT_STICKY"      "STRICT_STICKY  -  Require exact chanspec match (0/1)"     "$STRICT_STICKY"      "bool"     ;;
+            6)  menu_edit "REQUIRE_160_CLIENT" "REQUIRE_160_CLIENT  -  Require 160MHz client to act (0/1)" "$REQUIRE_160_CLIENT" "bool"     ;;
+            7)  menu_edit "COOLDOWN"           "COOLDOWN  -  Min seconds between recovery attempts"       "$COOLDOWN"           "int"      ;;
+            8)  menu_edit "CAC_POLL"           "CAC_POLL  -  Seconds between CAC status polls"            "$CAC_POLL"           "int"      ;;
+            9)  menu_edit "CAC_TIMEOUT"        "CAC_TIMEOUT  -  Max seconds to wait for CAC"              "$CAC_TIMEOUT"        "int"      ;;
+            10) menu_edit "MANAGE_CRON"        "MANAGE_CRON  -  Auto-manage cron and init-start (0/1)"    "$MANAGE_CRON"        "bool"     ;;
+            11) menu_edit "VERBOSE"            "VERBOSE  -  Log level (0=silent, 1=basic, 2=verbose)"     "$VERBOSE"            "int"      ;;
+            12) menu_edit "LOG_ROTATE_RAM"     "LOG_ROTATE_RAM  -  Rotate log in RAM, no temp file (0/1)" "$LOG_ROTATE_RAM"     "bool"     ;;
+            13) menu_edit "LOG_LINES"          "LOG_LINES  -  Number of log lines to retain"              "$LOG_LINES"          "int"      ;;
             a) show_about ;;
             i) $SCRIPT_PATH install ;;
             u) $SCRIPT_PATH uninstall ;;
@@ -583,6 +604,16 @@ show_about() {
     printf '        100/160). Any drift within the block triggers a move back.\n'
     printf '\n'
     printf '        Enforced when [GUI/NVRAM] set to fixed channel.\n'
+    printf '\n'
+    printf '  REQUIRE_160_CLIENT\n'
+    printf '    0 = Bypass the client-capability gate entirely. The script\n'
+    printf '        will attempt recovery/move-back logic every run\n'
+    printf '        regardless of whether any associated client advertises\n'
+    printf '        SGI160. Useful if you want 160MHz maintained purely for\n'
+    printf '        link headroom, future clients, or if your client\n'
+    printf '        detection is unreliable.\n'
+    printf '    1 = Default. Only attempt recovery/move-back when at least\n'
+    printf '        one associated client advertises SGI160 in its VHT caps.\n'
     printf '\n'
     printf ' +-- Timing -------------------------------------------------------+\n'
     printf '\n'

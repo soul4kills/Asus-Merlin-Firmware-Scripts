@@ -32,7 +32,7 @@ STRICT_STICKY=1         # 0=any 160MHz channel within the assigned block is acce
                         # Note: automatically sets to 1 when NVRAM wl1_chanspec is set to FIXED channel (dual-band only)
 
 # Shared options
-REQUIRE_160_CLIENT=1    # 0=skip the 160MHz-capable-client check entirely; always attempt recovery (default)
+REQUIRE_160_CLIENT=0    # 0=skip the 160MHz-capable-client check entirely; always attempt recovery (default)
                         # 1=only attempt recovery when an associated client advertises SGI160
 COOLDOWN=60             # Minimum seconds between recovery attempts (per radio in tri-band)
 CAC_POLL=60             # Seconds between each CAC status poll

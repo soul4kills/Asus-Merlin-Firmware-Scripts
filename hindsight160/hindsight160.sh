@@ -32,7 +32,7 @@ STRICT_STICKY=1         # 0=any 160MHz channel within the assigned block is acce
                         # Note: automatically sets to 1 when NVRAM wl1_chanspec is set to FIXED channel (dual-band only)
 
 # Shared options
-REQUIRE_160_CLIENT=0    # 0=skip the 160MHz-capable-client check entirely; always attempt recovery
+REQUIRE_160_CLIENT=1    # 0=skip the 160MHz-capable-client check entirely; always attempt recovery
                         # 1=only attempt recovery when an associated client advertises SGI160 (default)
 COOLDOWN=60             # Minimum seconds between recovery attempts (per radio in tri-band)
 CAC_POLL=60             # Seconds between each CAC status poll
@@ -143,61 +143,75 @@ try_dfs_ap_move() {
 # Polls until CAC completes (move status=-1) or CAC_TIMEOUT is reached.
 # Returns 0 on success, 1 on timeout.
 wait_for_cac() {
-    local iface="$1" elapsed=0 status move_status next_sleep=5
+    local iface="$1" elapsed=0 status move_status
     log_dfs_status "$iface" "POLL-START"
 
-    while [ "$elapsed" -le "$CAC_TIMEOUT" ]; do
-        sleep "$next_sleep"
-        elapsed=$((elapsed + next_sleep))
+    # Early abort check
+    sleep 5
+    status=$(wl -i "$iface" dfs_ap_move 2>/dev/null)
+    if echo "$status" | grep -q "move status=3"; then
+        # log_dfs_status "$iface" "EARLY-EXIT"
+        log 1 "[$iface][WARN] CAC aborted early (move status=3) after 5s."
+        return 1
+    elif echo "$status" | grep -q "move status=-1"; then
+        # log_dfs_status "$iface" "EARLY-EXIT"
+        log 1 "[$iface][WARN] CAC complete after 5s."
+        return 0
+    fi
 
-        # Determine next sleep based on where we are in the CAC
-        if [ "$elapsed" -lt 60 ]; then
-            next_sleep=30
-        else
-            next_sleep=$CAC_POLL
-        fi
-
+    while [ "$elapsed" -lt "$CAC_TIMEOUT" ]; do
+        sleep "$CAC_POLL"
+        elapsed=$((elapsed + CAC_POLL))
         status=$(wl -i "$iface" dfs_ap_move 2>/dev/null)
         move_status=$(echo "$status" | grep -o "move status=[0-9-]*" | head -1)
-
         if [ "$VERBOSE" -ge 2 ]; then
             log 2 "[$iface][DFS:POLL-${elapsed}s]"
             echo "$status" | while IFS= read -r line; do
                 echo "$(date):   $line" >> "$LOG_FILE"
             done
         fi
-
-        case "$move_status" in
-            "move status=-1")
-                log 1 "[$iface] CAC complete after ${elapsed}s."
-                return 0 ;;
-            "move status=3")
-                log 1 "[$iface][WARN] CAC aborted (move status=3) after ${elapsed}s."
-                return 1 ;;
-        esac
+        echo "$move_status" | grep -q "move status=-1" && {
+            log 1 "[$iface] CAC complete after ${elapsed}s."
+            return 0
+        }
+        echo "$move_status" | grep -q "move status=3" && {
+            log 1 "[$iface][WARN] CAC aborted (move status=3) after ${elapsed}s."
+            return 1
+        }
     done
-
     log 1 "[$iface][WARN] CAC timed out after ${elapsed}s."
     return 1
 }
 
-# Returns 0 if at least one associated client advertises SGI160 in VHT caps,
-# OR if the current channel is above 128 (non-DFS upper UNII-3 channels in
-# most regions, e.g. 149-165) in which case the client check is bypassed.
-# Returns 1 if no clients are present or none are 160MHz-capable.
+# Client-capability gate. Controlled entirely by REQUIRE_160_CLIENT.
+# REQUIRE_160_CLIENT=0 -> always returns 0 (gate bypassed, recovery always attempted).
+# REQUIRE_160_CLIENT=1 (default) -> returns 0 if at least one associated client
+#   advertises SGI160 in VHT caps. Only if no such client is found does it then
+#   check whether the current channel is above 128 (non-DFS upper UNII-3
+#   channels in most regions, e.g. 149-165); if so, the gate still passes.
+# Returns 1 if the gate is not satisfied (caller should skip this run).
 is_160_active_or_capable() {
     local iface="$1" info current_chan
 
-    current_chan=$(wl -i "$iface" chanspec 2>/dev/null | awk -F/ '{print $1}')
-    if [ "${current_chan:-0}" -gt 128 ] 2>/dev/null; then
-        log 3 "[$iface] Channel [$current_chan] above 128. Bypassing client-capability check."
+    # Bypass check if REQUIRE_160_CLIENT=0, allowing recovery even with no 160MHz-capable clients.
+    if [ "$REQUIRE_160_CLIENT" != "1" ]; then
+        log 1 "[$iface] Client capability check bypassed (REQUIRE_160_CLIENT=0)."
         return 0
     fi
 
+    # No connected clients will produce an error -> skip recovery as no clients are present to benefit from 160MHz.
     info=$(wl -i "$iface" assoclist 2>/dev/null | grep -oE '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' 2>/dev/null | xargs -r -I {} wl -i "$iface" sta_info {} 2>/dev/null) || return 1
 
     if echo "$info" | grep -qE "SGI160"; then
         log 3 "[$iface] 160MHz-capable client found."
+        return 0
+    fi
+
+    # If no 160MHz-capable clients are found, check if the current channel is above 128. If so, bypass the client-capability check and recover to 160MHz.
+    current_chan=$(wl -i "$iface" chanspec 2>/dev/null | awk '{print $1}')
+    current_chan="${current_chan%%/*}"
+    if [ "${current_chan:-129}" -gt 128 ] 2>/dev/null; then
+        log 3 "[$iface] Channel [$current_chan] above 128. Bypassing client-capability check."
         return 0
     fi
 
@@ -248,13 +262,9 @@ process_radio() {
     fi
 
     # 160MHz client capability check
-    if [ "$REQUIRE_160_CLIENT" = "1" ]; then
-        if ! is_160_active_or_capable "$iface"; then
-            log 1 "[$iface][SKIP] No 160MHz-capable clients associated."
-            return
-        fi
-    else
-        log 1 "[$iface] Client capability check bypassed (REQUIRE_160_CLIENT=0)."
+    if ! is_160_active_or_capable "$iface"; then
+        log 1 "[$iface][SKIP] No 160MHz-capable clients associated."
+        return
     fi
 
     # Read current radio state

@@ -184,8 +184,8 @@ wait_for_cac() {
 }
 
 # Client-capability gate. Controlled entirely by REQUIRE_160_CLIENT.
-# REQUIRE_160_CLIENT=0 -> always returns 0 (gate bypassed, recovery always attempted).
-# REQUIRE_160_CLIENT=1 (default) -> returns 0 if at least one associated client
+# REQUIRE_160_CLIENT=0 (default) -> always returns 0 (gate bypassed, recovery always attempted).
+# REQUIRE_160_CLIENT=1 -> returns 0 if at least one associated client
 #   advertises SGI160 in VHT caps. Only if no such client is found does it then
 #   check whether the current channel is above 128 (non-DFS upper UNII-3
 #   channels in most regions, e.g. 149-165); if so, the gate still passes.
